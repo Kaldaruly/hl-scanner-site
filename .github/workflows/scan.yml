@@ -2,13 +2,11 @@ name: hourly-scan
 
 on:
   schedule:
-    - cron: "7 * * * *"   # каждый час в :07 UTC
+    - cron: "7 * * * *"   # поиск трейдеров раз в час, :07 UTC
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: scan
@@ -18,24 +16,44 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 55
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      # код сканера лежит в приватном репо, тянем его read-only ключом
+      # код сканера — в приватном репо, тянем read-only ключом
       - uses: actions/checkout@v5
         with:
           repository: Kaldaruly/hl-scanner
           ssh-key: ${{ secrets.SCANNER_DEPLOY_KEY }}
+          path: app
+      # память между запусками — ветка state этого репо
+      - uses: actions/checkout@v5
+        with:
+          path: state
+          fetch-depth: 0
+      - name: Switch to state branch
+        working-directory: state
+        run: |
+          git config user.name "hl-scanner-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin state; then
+            git fetch origin state && git checkout state
+          else
+            git checkout --orphan state && git rm -rf --quiet . && git commit --allow-empty -m "init state"
+          fi
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt
-      - run: python -m scanner.run
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      - run: pip install -r app/requirements.txt
+      - name: Scan
+        working-directory: app
+        run: python -m scanner.run --state ../state/scan_state.json --out ../state/traders.json
+      - name: Save state
+        working-directory: state
+        run: |
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -q -m "scan $(date -u +%FT%TZ)"
+          for i in 1 2 3 4 5; do
+            git push -q origin state && exit 0
+            git pull -q --rebase origin state || true
+            sleep $((i*3))
+          done
+          exit 1

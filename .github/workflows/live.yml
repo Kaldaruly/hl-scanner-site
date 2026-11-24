@@ -1,0 +1,79 @@
+name: live
+
+on:
+  schedule:
+    - cron: "4,19,34,49 * * * *"   # каждые 15 минут
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: live
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: Kaldaruly/hl-scanner
+          ssh-key: ${{ secrets.SCANNER_DEPLOY_KEY }}
+          path: app
+      - uses: actions/checkout@v5
+        with:
+          path: state
+          fetch-depth: 0
+      - name: Switch to state branch
+        id: st
+        working-directory: state
+        run: |
+          git config user.name "hl-scanner-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin state; then
+            git fetch origin state && git checkout state
+          fi
+          if [ -f traders.json ]; then echo "ready=1" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-python@v6
+        if: steps.st.outputs.ready
+        with:
+          python-version: "3.12"
+      - if: steps.st.outputs.ready
+        run: pip install -r app/requirements.txt
+      - name: Positions + Telegram
+        if: steps.st.outputs.ready
+        working-directory: app
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          mkdir -p ../_site && cp -r site/. ../_site/
+          python -m scanner.alerts --traders ../state/traders.json --state ../state/alert_state.json --out ../_site/data/traders.json
+      - name: Save state
+        if: steps.st.outputs.ready
+        working-directory: state
+        run: |
+          git add alert_state.json
+          git diff --cached --quiet && exit 0
+          git commit -q -m "live $(date -u +%FT%TZ)"
+          for i in 1 2 3 4 5; do
+            git push -q origin state && exit 0
+            git pull -q --rebase origin state || true
+            sleep $((i*3))
+          done
+          exit 1
+      - uses: actions/configure-pages@v5
+        if: steps.st.outputs.ready
+      - uses: actions/upload-pages-artifact@v5
+        if: steps.st.outputs.ready
+        with:
+          path: _site
+      - id: deploy
+        if: steps.st.outputs.ready
+        uses: actions/deploy-pages@v4
