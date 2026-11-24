@@ -74,6 +74,14 @@ jobs:
         if: steps.st.outputs.ready
         with:
           path: _site
+      # артефакт иногда виден не сразу — ждём и пробуем ещё раз
+      - if: steps.st.outputs.ready
+        run: sleep 15
       - id: deploy
         if: steps.st.outputs.ready
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+      - if: steps.st.outputs.ready && steps.deploy.outcome == 'failure'
+        run: sleep 45
+      - if: steps.st.outputs.ready && steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@v5
