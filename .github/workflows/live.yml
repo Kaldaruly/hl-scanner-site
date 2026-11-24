@@ -2,13 +2,14 @@ name: live
 
 on:
   schedule:
-    - cron: "4,19,34,49 * * * *"   # каждые 15 минут
+    - cron: "4,19,34,49 * * * *"   # каждые 15 минут (GitHub может опаздывать; основной запуск — cron-job.org)
   workflow_dispatch:
 
 permissions:
   contents: write
   pages: write
   id-token: write
+  actions: write
 
 concurrency:
   group: live
@@ -22,6 +23,21 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
+      # раз в час запускаем поиск трейдеров, если он не идёт и прошлый был давно
+      - name: Kick hourly scan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh run list -R "$GITHUB_REPOSITORY" --workflow scan.yml --limit 1 --json status,createdAt \
+                 -q '.[0] | "\(.status) \(.createdAt)"' || echo "none 1970-01-01T00:00:00Z")
+          [ -z "$last" ] && last="none 1970-01-01T00:00:00Z"
+          status=${last%% *}; created=${last#* }
+          age=$(( $(date -u +%s) - $(date -u -d "$created" +%s) ))
+          echo "last scan: $status, $age s ago"
+          case "$status" in queued|in_progress|waiting|pending|requested) exit 0 ;; esac
+          if [ "$age" -gt 3300 ]; then
+            gh workflow run scan.yml -R "$GITHUB_REPOSITORY" --ref main && echo "scan started"
+          fi
       - uses: actions/checkout@v5
         with:
           repository: Kaldaruly/hl-scanner
