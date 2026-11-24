@@ -68,7 +68,7 @@ jobs:
             sleep $((i*3))
           done
           exit 1
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         if: steps.st.outputs.ready
       - uses: actions/upload-pages-artifact@v5
         if: steps.st.outputs.ready
@@ -76,4 +76,4 @@ jobs:
           path: _site
       - id: deploy
         if: steps.st.outputs.ready
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
