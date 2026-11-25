@@ -2,7 +2,7 @@ name: live
 
 on:
   schedule:
-    - cron: "1-59/5 * * * *"   # каждые 5 минут; cron-job.org страхует раз в 15 минут
+    - cron: "4,19,34,49 * * * *"   # страховка; основной запуск каждые 5 мин — cron-job.org
   workflow_dispatch:
 
 permissions:
